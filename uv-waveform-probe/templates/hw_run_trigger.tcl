@@ -1,27 +1,28 @@
 # =============================================================================
-# hw_run.tcl 触发采集段模板 - 加到 hw_run.tcl 的 initialize 之后、exit 之前
-# 改 <触发组名> 和波形输出名即可
+# hw_run.tcl trigger/capture section template
+# Add this to hw_run.tcl after initialize and before exit.
+# Just fill in the <trigger_group> and the waveform output name.
 # =============================================================================
 
-# ---- 触发采集段 ----
-# 1. 查询触发组(确认 probe.tcl 注册成功)
+# ---- Trigger / capture section ----
+# 1. Query the trigger group (confirms the probe.tcl registration worked)
 query -trigger
-query -trigger -name <触发组名>
+query -trigger -name <trigger_group>
 
-# 2. 加载触发条件 + 开启采集
+# 2. Load the trigger condition + enable capture
 trigger -set -condition ./user_script/uhd_setting.ini -position 5
 capture -enable
 trigger -enable
 
-# 3. 等待触发(阻塞, 最多等 timeout 秒; 慢事件给 30~120)
+# 3. Wait for the trigger (blocking, up to `timeout` seconds; 30~120 for slow events)
 set trigger_tag [trigger -status -wait 1 -timeout 30 -tclobj]
 puts "trigger_tag: $trigger_tag"
 
-# 4. 导出原始数据 + 生成波形(.usdb)
-#    -out 和 -bindir 的目录名要一致(下面都用 test_uhd)
+# 4. Export raw data + generate the waveform (.usdb)
+#    The directory name for -out and -bindir must match (both use test_uhd below)
 upload_uhd -depth 1000000 -out test_uhd -force
 wavegen -bindir ./UHD/test_uhd
-# 波形文件: ./UHD/test_uhd/UvData.usdb
+# Waveform file: ./UHD/test_uhd/UvData.usdb
 
-# 5. 打开波形 GUI(需要 X11 转发; batch 跑时注释掉):
+# 5. Open the waveform GUI (needs X11 forwarding; comment out when running in batch):
 #uvgui -u ./UHD/test_uhd/UvData.usdb

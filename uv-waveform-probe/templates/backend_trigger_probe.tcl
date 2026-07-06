@@ -1,10 +1,13 @@
 # =============================================================================
-# backend.tcl / be_run.tcl 里 trigger_probe 的插入位置（最关键、最易漏！）
+# Where to insert trigger_probe in backend.tcl / be_run.tcl
+# (the most critical and most-missed step!)
 #
-# fe 的 probe_net/trigger_net 只是"登记", be 阶段必须用 trigger_probe 落地,
-# 否则 fe/be 都不报错但上板抓不到信号。
+# probe_net/trigger_net at fe only "register" - the be stage must use
+# trigger_probe to instantiate them, otherwise fe/be report no errors but
+# nothing is captured on board.
 #
-# 下面标 ★ 的两行是要加的, 其余是典型 backend.tcl 的上下文
+# The two lines marked ★ below are what you add; the rest is typical
+# backend.tcl context.
 # =============================================================================
 
 read_netlist
@@ -13,15 +16,15 @@ link_design
 instrument_design
 sanitize_design
 init_runtime_data
-trigger_probe -check          ;# ★ 检查所有 probe/trigger 信号是否存在(sweep_design 之前)
+trigger_probe -check          ;# ★ verify all probe/trigger signals exist (before sweep_design)
 sweep_design
 
-# 时钟处理
+# clock processing
 config_clock ...
 infer_clock
 transform_clock
 
-trigger_probe -group          ;# ★ 打包成 pseudo-IP(partition_design 之前)
-sweep_design -remap           ;# ★ 参考工程在 -group 后立刻 remap
+trigger_probe -group          ;# ★ package into a pseudo-IP (before partition_design)
+sweep_design -remap           ;# ★ the reference project remaps right after -group
 
-# ... 之后照常 partition_design / route / compile_fpga
+# ... then continue with partition_design / route / compile_fpga as usual
