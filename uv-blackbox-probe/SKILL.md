@@ -157,7 +157,39 @@ wavegen -bindir ./UHD/test_uhd       ;# produces ./UHD/test_uhd/UvData.usdb
 
 > Blackbox signals carry an extra path prefix, so in the runtime GUI / ini file the signal name is prefixed with the blackbox instance — locate it via the hierarchy.
 
-## 5. Troubleshooting
+## 5. Daughter-card / Probe-Group resource check (do this before be partition, or you hit PAR-028 every time)
+
+> This is the **most hidden prerequisite** of UHD probing: the probe's physical resource is not in the FPGA chip, but on a **DDR4 daughter card** plugged into the board.
+
+**Root cause**: `Probe-Group` is not an FPGA-intrinsic resource like LUT/FF. It is a UHD-specific physical resource — the waveform data captured by probes is stored on a **DDR4 DC** (`UV_FMCH_PDDR4DME`, an FMC-form-factor DDR4 card with a DME / Direct-Memory-Engine). Without this card, the `Probe-Group` quota is **0**, so even at 0.4% logic utilization the build reports "insufficient".
+
+The platform default `assemble.tcl` states verbatim: **"it is mandatory to assemble DDR4 DC on FMC3 for each FPGA for UHD"**.
+
+**Failure symptom** (be-stage `partition_design`):
+```
+[PAR-028] ERROR: DUT requires more resource than N FPGAs, insufficient resource Probe-Group.
+[PAR-005] ERROR: Abort partition due to prelude failure: Resource manager checking failed.
+```
+At this point the resource table shows REG/LUT at only 0.x% (nowhere near full), but `report_system_resource` shows `Probe-Group = 0` on the active FPGA. **Logic isn't exceeded — the probe storage is just zero.**
+
+**How to check** (after assemble, before partition):
+```tcl
+# Inspect report_system_resource output for the active FPGA (e.g. b0.f2) Probe-Group
+report_system_resource
+# Expect: Probe-Group Total > 0. If 0 -> the DDR4 DC is not attached.
+config_hw -report       ;# also confirm the daughter card is actually connected
+```
+
+**Fix**: in the assemble script (e.g. `u2_assemble.tcl`), attach a DDR4 DC on the FMC3 slot of **every FPGA in use**. For a single-FPGA design, attach only that one:
+```tcl
+config_hw -create_daughter_card UV_FMCH_PDDR4DME -instance pddr4dme_inst2
+config_hw -connect_daughter_card {b0.F2_FMC3 pddr4dme_inst2.FMC}
+```
+> FMC3 is the **dedicated slot** for UHD (DME pins are hard-wired to FMC3) — do not use FMC0/1/2. For multi-FPGA designs, attach one card on each FPGA's own FMC3 (instance names inst0/1/2/3 map to f0/1/2/3).
+
+**Hardware prerequisite**: the physical FMC3 slot of the active FPGA **must actually have a PDDR4DME card plugged in**. Assemble-level attach without the physical card -> on-board capture fails or yields invalid data.
+
+## 6. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -168,8 +200,9 @@ wavegen -bindir ./UHD/test_uhd       ;# produces ./UHD/test_uhd/UvData.usdb
 | be reports `wildcard not supported in backend` | be used `sig[*]` | expand bit-by-bit at be: `sig[0] sig[1] ...` |
 | fe/be both pass but nothing captured on board | the sampling clock and signals were partitioned onto different FPGAs | single-FPGA designs (this repo uses `set_fpga_count -number 1`) are naturally fine; multi-FPGA needs a constraint pinning them to the same FPGA |
 | Signals show X / all-0 in the waveform | the blackbox DCP isn't actually running / clock not up | first confirm the blackbox's top-level ports have activity; retry with a top-level global clock |
+| be partition reports `PAR-028 insufficient resource Probe-Group` (logic at only 0.x%) | no DDR4 DC (`UV_FMCH_PDDR4DME`) attached on the active FPGA's FMC3; `report_system_resource` shows Probe-Group=0 | attach a PDDR4DME on FMC3 of every active FPGA in the assemble script (see §5); editing assemble only needs a `be` re-run |
 
-## 6. Re-run decisions
+## 7. Re-run decisions
 
 | What changed | Re-run |
 |---|---|
@@ -177,8 +210,9 @@ wavegen -bindir ./UHD/test_uhd       ;# produces ./UHD/test_uhd/UvData.usdb
 | add the `allow_local_clock` option | `fe` → `be` (option takes effect in fe) |
 | only change the be `-gate` path | just `be` |
 | change the DCP itself (re-synthesize in frontend Vivado) | frontend synth → `make links` → `fe` → `be` |
+| add/change the DDR4 DC in assemble (fix PAR-028) | just `be` (assemble runs at the be stage; does not affect fe synthesis) |
 
-## 7. Authoritative references
+## 8. Authoritative references
 
 | Content | Path / section |
 |---|---|
@@ -190,7 +224,7 @@ wavegen -bindir ./UHD/test_uhd       ;# produces ./UHD/test_uhd/UvData.usdb
 
 UG path: `/nfs/tools/uvhs/p4_20260602/doc/UVHS-2/user_guide/`
 
-## 8. Template files (bundled with this skill)
+## 9. Template files (bundled with this skill)
 
 - `templates/probe_bbox.tcl` — fe blackbox probe declaration (can be `source`d directly)
 - `templates/backend_blackbox_probe.tcl` — shows where to place the be `-gate` instantiation

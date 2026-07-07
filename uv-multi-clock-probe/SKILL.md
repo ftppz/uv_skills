@@ -217,7 +217,37 @@ query -capture                 # per-station bit counts; sum vs. declared width
 
 ---
 
-## 7. Troubleshooting (multi-clock-domain specific)
+## 7. Daughter-card / Probe-Group resource check (do this before be partition, or you hit PAR-028 every time)
+
+> This is the **most hidden prerequisite** of UHD probing: the probe's physical resource is not in the FPGA chip, but on a **DDR4 daughter card** plugged into the board.
+
+**Root cause**: `Probe-Group` is not an FPGA-intrinsic resource like LUT/FF. It is a UHD-specific physical resource — waveform data captured by probes is stored on a **DDR4 DC** (`UV_FMCH_PDDR4DME`, an FMC-form-factor DDR4 card with a DME / Direct-Memory-Engine). Without this card, the `Probe-Group` quota is **0**, so even at 0.4% logic utilization the build reports "insufficient". This bite applies to **every** clock domain — multi-clock probing needs the card just as much as single-clock.
+
+The platform default `assemble.tcl` states verbatim: **"it is mandatory to assemble DDR4 DC on FMC3 for each FPGA for UHD"**.
+
+**Failure symptom** (be-stage `partition_design`):
+```
+[PAR-028] ERROR: DUT requires more resource than N FPGAs, insufficient resource Probe-Group.
+[PAR-005] ERROR: Abort partition due to prelude failure: Resource manager checking failed.
+```
+At this point the resource table shows REG/LUT at only 0.x% (nowhere near full), but `report_system_resource` shows `Probe-Group = 0` on the active FPGA. **Logic isn't exceeded — the probe storage is just zero.**
+
+**How to check** (after assemble, before partition):
+```tcl
+report_system_resource    ;# is Probe-Group Total > 0? (0 = DC not attached)
+config_hw -report         ;# also confirm the daughter card is actually connected
+```
+
+**Fix**: in the assemble script, attach a DDR4 DC on the FMC3 slot of **every FPGA in use** (FMC3 is the dedicated UHD slot — DME pins are hard-wired to FMC3). Editing assemble only needs a `be` re-run:
+```tcl
+config_hw -create_daughter_card UV_FMCH_PDDR4DME -instance pddr4dme_inst2
+config_hw -connect_daughter_card {b0.F2_FMC3 pddr4dme_inst2.FMC}
+```
+**Hardware prerequisite**: the physical FMC3 slot of the active FPGA **must actually have a PDDR4DME card plugged in**.
+
+---
+
+## 8. Troubleshooting (multi-clock-domain specific)
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -227,10 +257,11 @@ query -capture                 # per-station bit counts; sum vs. declared width
 | Need cross-domain AND but OR-only is allowed | UHD cannot AND across clock domains | move the relevant signals into one clock domain, or `trigger -force` one side |
 | Gated-clock domain data looks wrong / sparse | gated clock not always running; documented limitation | Runtime CMD RfM: if `clk_dut` is off, `TS_CAPT_START`/`CLK_CAPT_CNT0` stay 0 — ensure the clock is running during capture |
 | fe/be clean, some signals missing | over the 17920-bit probe budget | see [uv-waveform-probe §2.3](../uv-waveform-probe/SKILL.md) |
+| be partition reports `PAR-028 insufficient resource Probe-Group` (logic at only 0.x%) | no DDR4 DC (`UV_FMCH_PDDR4DME`) attached on the active FPGA's FMC3 | attach a PDDR4DME on FMC3 of every active FPGA in the assemble script (see §7); editing assemble only needs a `be` re-run |
 
 ---
 
-## 8. Checklist (multi-clock-domain probe)
+## 9. Checklist (multi-clock-domain probe)
 
 - [ ] Each clock domain has its **own** `trigger_net -group` (unique names).
 - [ ] Every **gated** sampling clock is declared with `trigger -set -gatedclk ... -frequency ... -polarity ...` **before** `trigger -set -condition`.
@@ -240,3 +271,4 @@ query -capture                 # per-station bit counts; sum vs. declared width
 - [ ] `trigger -status` checked before `upload_uhd`.
 - [ ] `upload_uhd -depth` is small first, with `-clock`; total bandwidth ≤ 102 Gbps.
 - [ ] `query -trigger` shows all groups; `query -capture` bit sums match declared width.
+- [ ] Active FPGA's FMC3 has a PDDR4DME DC attached (assemble); `report_system_resource` shows Probe-Group > 0 — otherwise PAR-028 aborts partition (see §7).

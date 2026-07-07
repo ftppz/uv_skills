@@ -305,7 +305,37 @@ For headless servers; query signal values via Tcl commands.
 
 ---
 
-## 8. Troubleshooting
+## 8. Daughter-card / Probe-Group resource check (do this before be partition, or you hit PAR-028 every time)
+
+> This is the **most hidden prerequisite** of UHD probing: the probe's physical resource is not in the FPGA chip, but on a **DDR4 daughter card** plugged into the board.
+
+**Root cause**: `Probe-Group` is not an FPGA-intrinsic resource like LUT/FF. It is a UHD-specific physical resource — waveform data captured by probes is stored on a **DDR4 DC** (`UV_FMCH_PDDR4DME`, an FMC-form-factor DDR4 card with a DME / Direct-Memory-Engine). Without this card, the `Probe-Group` quota is **0**, so even at 0.4% logic utilization the build reports "insufficient".
+
+The platform default `assemble.tcl` states verbatim: **"it is mandatory to assemble DDR4 DC on FMC3 for each FPGA for UHD"**.
+
+**Failure symptom** (be-stage `partition_design`):
+```
+[PAR-028] ERROR: DUT requires more resource than N FPGAs, insufficient resource Probe-Group.
+[PAR-005] ERROR: Abort partition due to prelude failure: Resource manager checking failed.
+```
+At this point the resource table shows REG/LUT at only 0.x% (nowhere near full), but `report_system_resource` shows `Probe-Group = 0` on the active FPGA. **Logic isn't exceeded — the probe storage is just zero.**
+
+**How to check** (after assemble, before partition):
+```tcl
+report_system_resource    ;# is Probe-Group Total > 0? (0 = DC not attached)
+config_hw -report         ;# also confirm the daughter card is actually connected
+```
+
+**Fix**: in the assemble script, attach a DDR4 DC on the FMC3 slot of **every FPGA in use** (FMC3 is the dedicated UHD slot — DME pins are hard-wired to FMC3). Editing assemble only needs a `be` re-run:
+```tcl
+config_hw -create_daughter_card UV_FMCH_PDDR4DME -instance pddr4dme_inst2
+config_hw -connect_daughter_card {b0.F2_FMC3 pddr4dme_inst2.FMC}
+```
+**Hardware prerequisite**: the physical FMC3 slot of the active FPGA **must actually have a PDDR4DME card plugged in**.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -318,10 +348,11 @@ For headless servers; query signal values via Tcl commands.
 | `trigger -status` times out / false | trigger condition never met | check the trigger value; extend timeout; confirm the DUT is running |
 | `UvData.usdb` not generated | wrong wavegen path | `wavegen -bindir` must point at the `upload_uhd -out` directory |
 | uvgui `cannot open display` | no X11 | `ssh -X`, or use `uvd` |
+| be partition reports `PAR-028 insufficient resource Probe-Group` (logic at only 0.x%) | no DDR4 DC (`UV_FMCH_PDDR4DME`) attached on the active FPGA's FMC3 | attach a PDDR4DME on FMC3 of every active FPGA in the assemble script (see §8); editing assemble only needs a `be` re-run |
 
 ---
 
-## 9. Reference docs & examples
+## 10. Reference docs & examples
 
 | Content | Path |
 |---|---|
