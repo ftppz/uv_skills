@@ -14,7 +14,7 @@ Capturing a waveform on the UVHS-2 prototype platform takes **four stages** befo
 ④ viewing:      uvgui / uvd                 → open the .usdb waveform
 ```
 
-**The stage most often missed is ②** (`trigger_probe -check` and `trigger_probe -group` in the backend). Skip these and neither fe nor be will report an error, but you'll capture nothing on the board — because the signal never made it to hardware.
+**The stage most often missed is ②** (`trigger_probe -check` and `trigger_probe -group` in the backend). Skip these and neither fe nor be will report an error, but you'll capture nothing on the board — because the signal never made it to hardware. A second silent failure: **exceeding the probe width budget (17920 bit/FPGA) drops overflow signals with no error** — see §1.6 and §2.3.
 
 ---
 
@@ -54,6 +54,22 @@ Capturing a waveform on the UVHS-2 prototype platform takes **four stages** befo
 ### 1.5 Where the project scripts live (confirm the fe/be script names)
 - Common: `user_script/frontend.tcl` (fe) / `user_script/backend.tcl` (be) / `user_script/hw_run.tcl` (runtime).
 - Could also be `fe_run.tcl` / `be_run.tcl`. Run `grep -l source.*probe user_script/*.tcl` to find the fe script first.
+
+### 1.6 Probe/trigger capacity budget (**ask this, then check the math**)
+When the user lists the signals they want to observe, **sum up the total bit-width and check it against the UHD budget before writing probe.tcl**:
+
+| Resource | Per-FPGA limit (UHD) |
+|---|---|
+| Probe total width | **35 capture stations × 512 bit = 17920 bit** |
+| Trigger total width | **16 trigger groups × 256 bit** |
+
+- **If total probe width ≤ 17920 bit** → proceed.
+- **If total probe width > 17920 bit** → **do NOT just write it and hope**. The compile will pass silently, but the overflow signals are dropped at `trigger_probe -group` and never show up in the waveform. Tell the user the budget is exceeded and **ask them to trim the list**:
+  - Drop signals they don't strictly need.
+  - Replace wide buses with bit-selects (e.g. `data[7:0]` instead of the full 1024-bit `data`).
+  - Keep only the status/flag signals, defer wide data buses to a second capture run.
+- Recompute the total after trimming; only write `probe_net` once it fits.
+- Per-FPGA, not system-wide: if the design spans multiple FPGAs, each FPGA's probes are budgeted independently (≤17920 bit each).
 
 ---
 
@@ -108,6 +124,31 @@ trigger_net -add -group test \
 > - `trigger_net` = "when to **stop capturing**" (UHD-Trigger, ≤16 trigger groups × 256 bits).
 >
 > A trigger is **not** required to also be a probe, and a probe **cannot** be turned into a trigger. The only link is the `-probe` flag, which pushes trigger signals into the probe list (so trigger ⊆ probe when `-probe` is used). The common real-world pattern is the opposite of "probe is a subset of trigger": probe a large set, then trigger on a subset of it — see the `uvhs_flow` reference project, where every `trigger_net` signal is already in `probe_net`.
+
+### 2.3 Probe/Trigger capacity limits (and how to verify)
+
+The UHD has **hard width walls** — exceeding them silently drops signals from the waveform.
+
+| | Probe (UHD-Probe) | Trigger (UHD-Trigger) |
+|---|---|---|
+| **Groups / stations** | ≤ 35 capture stations / FPGA | ≤ 16 trigger groups / system |
+| **Width per group** | 512 bit | ≤ 256 bit (same clock domain within a group) |
+| **Total width (per FPGA)** | **35 × 512 = 17920 bit** | 16 × 256 = 4096 bit |
+
+- **Where the wall comes from**: 35 capture stations is the number of UHD capture-IP instances physically instantiated per FPGA; 512 bit is the fixed channel width of each station (station → APCP → DDR). Both are hardware, **not configurable**.
+- **Width vs. depth are orthogonal**: the **width** wall (17920 bit) is set by the capture IP; the **depth** (`upload_uhd -depth <N>`, how many cycles) is set by the 16 GB DDR4 dedicated to UHD per FPGA. Running out of width is **not** solved by more DDR — they are independent budgets.
+- **`trigger_net -probe` eats the probe budget**: signals added with `-probe` count toward **both** the trigger budget (≤256 bit/group) and the probe budget (≤17920 bit). Account for both when summing.
+- **Multi-FPGA**: each FPGA is budgeted independently (≤17920 bit each), not a shared system pool.
+
+#### How to verify nothing was dropped (run on board)
+```tcl
+query -capture            ;# lists each station + the bit count actually packed into it
+```
+Sum the per-station bit counts and compare to the total width you declared in `probe_net`:
+- **Equal** → all signals captured.
+- **Less than declared** → overflow, some signals were dropped → trim the probe list (drop unneeded signals, or use bit-selects like `sig[7:0]` instead of full buses), then rerun fe + be.
+
+> ⚠️ **Silent failure mode**: `probe_net` + `trigger_probe -check/-group` do **not** error when the budget is exceeded — fe/be both look clean, but the overflow signals are simply absent from the waveform. Always confirm with `query -capture`.
 
 ---
 
@@ -272,6 +313,7 @@ For headless servers; query signal values via Tcl commands.
 | fe reports `clock ... not found / blackbox internal clock` | the sampling clock is inside a blackbox | switch to a globally visible top-level clock |
 | be `trigger_probe -check` errors | the signal got optimized away after fe, or the path is wrong | check the path; make sure the signal wasn't swept away |
 | **fe/be both clean but nothing captured on board** | **missed `trigger_probe -group`** | add `trigger_probe -group` + `sweep_design -remap` after transform_clock in be |
+| **fe/be both clean, but some signals missing in the waveform** | **probe width exceeded the 17920-bit (35×512) budget** — overflow is silently dropped | run `query -capture`, sum per-station bits vs. declared width; trim the probe list (drop unneeded signals, or use bit-selects like `sig[7:0]`) and rerun fe + be |
 | hw_run.tcl reports `trigger group not found` | the group name differs across the three files | reconcile the group name spelling in probe.tcl/ini/hw_run.tcl |
 | `trigger -status` times out / false | trigger condition never met | check the trigger value; extend timeout; confirm the DUT is running |
 | `UvData.usdb` not generated | wrong wavegen path | `wavegen -bindir` must point at the `upload_uhd -out` directory |
