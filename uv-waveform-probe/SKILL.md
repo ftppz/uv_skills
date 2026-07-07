@@ -23,7 +23,7 @@ Capturing a waveform on the UVHS-2 prototype platform takes **four stages** befo
 - UVHS-2 V2025.06.P4 (or the same series), prototyping (APS) flow.
 - The design already compiles through fe + be (`make uv_fe && make uv_be` produces a bitstream).
 - The signal you want to observe is **visible** at the fe stage (top-level port, or an internal RTL signal inside a non-blackbox module).
-  - Signals **inside a blackbox IP (DCP) cannot be probed** — only its top-level ports or the nets connecting it to the top.
+  - For **signals inside a blackbox IP (DCP)**, this skill does not cover them — use the sibling skill [`uv-blackbox-probe`](../uv-blackbox-probe) (`probe_net -blackbox_instance` / `trigger_net -blackbox_instance -gate`), which is purpose-built for that.
 
 ---
 
@@ -35,11 +35,11 @@ Capturing a waveform on the UVHS-2 prototype platform takes **four stages** befo
     - e.g. `xs_fpga_top_debug_1902.S_AXI_MEM_awaddr` (top is `xs_fpga_top_debug_1902`).
     - e.g. `top.u_xdma.cfg_ltssm_state` (top is `top`).
 - Multi-bit bus: `top.u.x.data[5:0]`, or use the wildcard `top.u.x.data[*]`.
-- A blackbox internal signal? **No** — only the blackbox's top-level ports or its connection to the top.
+- A blackbox internal signal? Use the sibling skill [`uv-blackbox-probe`](../uv-blackbox-probe) — this skill only handles non-blackbox (top-level / RTL-internal) signals.
 
 ### 1.2 Which clock samples it? (**critical**)
 - Must be a **globally visible clock** at the fe stage.
-- **Cannot use a blackbox internal clock** (the probe_net docs state it explicitly: `Specifying a blackbox internal clock as the sampling clock is not supported`).
+- A blackbox internal clock is **not allowed by default** (the probe_net docs: `Specifying a blackbox internal clock as the sampling clock is not supported`) — but can be unlocked with `set_option signal.uhd.sampling_clock.allow_local_clock true`. If you need that, you're in blackbox-probing territory — see [`uv-blackbox-probe`](../uv-blackbox-probe).
 - For slow-changing status signals (LTSSM, link_up, busy, done), sample with an external reference clock (e.g. 100 MHz sys_clk).
 - The clock also uses a full path: `xs_fpga_top_debug_1902.u_wrapper.sys_clk` (not `top.xxx`).
 
@@ -92,7 +92,7 @@ probe_net -clock {xs_fpga_top_debug_1902.u_wrapper.sys_clk} -add { \
 }
 ```
 
-- `-clock`: full path to the sampling clock — **must be visible and not inside a blackbox**.
+- `-clock`: full path to the sampling clock — must be a globally visible clock (not a blackbox internal one; for blackbox-internal clocks use [`uv-blackbox-probe`](../uv-blackbox-probe)).
 - `-add { ... }`: signal list using RTL full paths. Buses and `*` wildcards are supported.
 - Use `\` for line continuation (that's how the reference project writes it).
 
@@ -309,8 +309,8 @@ For headless servers; query signal values via Tcl commands.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| fe reports `signal not found` | wrong path, or a blackbox internal signal | fix the full path; blackbox internals can't be probed |
-| fe reports `clock ... not found / blackbox internal clock` | the sampling clock is inside a blackbox | switch to a globally visible top-level clock |
+| fe reports `signal not found` | wrong path, or you're trying to probe a blackbox internal signal with the non-blackbox syntax | fix the full path; for blackbox-internal signals use [`uv-blackbox-probe`](../uv-blackbox-probe) |
+| fe reports `clock ... not found / blackbox internal clock` | the sampling clock is inside a blackbox | switch to a globally visible top-level clock, or enable blackbox-internal clocks per [`uv-blackbox-probe`](../uv-blackbox-probe) |
 | be `trigger_probe -check` errors | the signal got optimized away after fe, or the path is wrong | check the path; make sure the signal wasn't swept away |
 | **fe/be both clean but nothing captured on board** | **missed `trigger_probe -group`** | add `trigger_probe -group` + `sweep_design -remap` after transform_clock in be |
 | **fe/be both clean, but some signals missing in the waveform** | **probe width exceeded the 17920-bit (35×512) budget** — overflow is silently dropped | run `query -capture`, sum per-station bits vs. declared width; trim the probe list (drop unneeded signals, or use bit-selects like `sig[7:0]`) and rerun fe + be |

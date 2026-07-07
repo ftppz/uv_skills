@@ -110,11 +110,11 @@ read_netlist
 link_design                     ;# ★ 必须先 link，把黑盒实例解析出来
 
 # --- 黑盒探针在 be 阶段重声明一遍（带 -gate）---
-probe_net -blackbox_instance {<gate路径 ins0/bbox>} \
-          -clock {<黑盒内时钟相对路径>} \
+probe_net -blackbox_instance {<parent>/<bbox_inst>} \
+          -clock {<sub>/clk_name} \
           -add {<sub>/sig[0] <sub>/sig[1]} -gate    ;# ★ -gate，且不能有 *
 trigger_net -add -group <组名> \
-            -blackbox_instance {<gate路径>} \
+            -blackbox_instance {<parent>/<bbox_inst>} \
             -clock {...} \
             -signal {<sub>/trig[0] <sub>/trig[1]} -gate
 
@@ -128,19 +128,30 @@ trigger_probe -group            ;# ★ 打包 pseudo-IP
 sweep_design -remap
 ```
 
-**be 阶段黑盒实例路径格式不同**：不带顶层、用 `/` 分隔。
-- fe：`xs_fpga_top_debug_1902.u_wrapper`
-- be：`u_wrapper`（partition 后顶层展平，黑盒实例直接挂在顶层下）
+**be 阶段黑盒实例路径格式不同**：gate-level，用 `/` 分隔，**不带顶层**，形如 `<parent>/<bbox_inst>`（父层/黑盒名）。
+- fe：`xs_fpga_top_debug_1902.u_wrapper`（`.` 分隔，带顶层）
+- be：`u_wrapper`（顶层在 be 已展平；若黑盒挂在某个子层下，则写 `父层/黑盒名`，如 `inst0/bbox1`）
 
 > be 路径以 `link_design` 后的网表为准，不确定时用 `get_cells -hier *<黑盒实例名>*` 查。
 
 ## 4. runtime 阶段：上板采集
 
-与普通探针**完全一样**，参见姊妹 skill `uv-waveform-probe` 的第 6 节：
-- `trigger -group <组名>` 配触发条件（probe_net 不需要触发也能采，但要 trigger_net 才能条件触发）
-- `capture -timeout ...` 采集
-- `upload_uhd -out test_uhd` 导出
-- `wavegen -bindir ./UHD/test_uhd` 生成 `.usdb`
+与普通探针**完全一样**，参见姊妹 skill `uv-waveform-probe` 的第 5 节。核心流程：
+
+```tcl
+query -trigger
+query -trigger -name <组名>          ;# 确认黑盒触发组建立成功
+trigger -set -condition ./user_script/uhd_setting.ini -position 5   ;# 触发条件值写在 ini 里
+capture -enable
+trigger -enable
+set r [trigger -status -wait 1 -timeout 30 -tclobj]   ;# 等触发, 确认命中后再 upload
+upload_uhd -depth 1000000 -out test_uhd -force
+wavegen -bindir ./UHD/test_uhd       ;# 生成 ./UHD/test_uhd/UvData.usdb
+#uvgui -u ./UHD/test_uhd/UvData.usdb
+```
+
+- `probe_net` 不需要触发也能采，但 `trigger_net` 才能条件触发（触发值写在 `uhd_setting.ini`）。
+- **组名三处一致**：`probe.tcl` 的 `trigger_net -group`、`uhd_setting.ini` 的 `[...]`、`hw_run.tcl` 的 `query -trigger -name`。
 
 > 黑盒信号多了一层路径前缀，在 runtime GUI / ini 文件里信号名会带上黑盒实例前缀，按层次找。
 
@@ -170,7 +181,7 @@ sweep_design -remap
 | 内容 | 路径 / 章节 |
 |---|---|
 | **黑盒探针语法（核心）** | `UVHS-2-Compiler-UG-Part2-Proto-Setup-...pdf` **§7.12** |
-| 采样时钟开关 | 同上 **附录 B.11** `signal.uhd.sampling_clock.allow_local_clock` |
+| 采样时钟开关 | 同上 **§7.12 Note1** `signal.uhd.sampling_clock.allow_local_clock` |
 | 普通探针语法（对照） | 同上 §7.11 |
 | probe_net / trigger_net 命令行参考 | `UVHS-2-Compile-CMD-RfM-...pdf` |
 | runtime 采集 / wavegen | `UVHS-2-Prototyping-Runtime-UG-...pdf` |
