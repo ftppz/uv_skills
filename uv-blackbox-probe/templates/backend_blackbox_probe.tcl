@@ -1,59 +1,64 @@
 # =============================================================================
-# backend_blackbox_probe.tcl — 黑盒探针在 be 阶段的【-gate 落地】位置示意
+# backend_blackbox_probe.tcl - where to place the blackbox probe's [-gate
+# instantiation] at the be stage
 #
-# ★ 这不是完整 backend.tcl, 只标出黑盒探针必须出现的位置。
-#   把标 ★ 的片段插到你 backend.tcl 的对应位置。
+# This is NOT a complete backend.tcl - it only marks where the blackbox probe
+# MUST appear. Insert the ★ fragments into the corresponding spots in your
+# backend.tcl.
 #
-# be 阶段和 fe 阶段有三处不同:
-#   1. -blackbox_instance 用 gate 路径 (/ 分隔, 不带顶层), 形如 <parent>/<bbox_inst>:
-#        fe 的 xs_fpga_top_debug_1902.u_wrapper -> be 的 u_wrapper
-#      (顶层在 be 已展平, 所以这里只剩实例名; 若黑盒挂在子层下则写成 父层/黑盒名)
-#   2. 命令结尾必须加 -gate
-#   3. 不支持通配符 *, 信号必须逐位展开
+# Three differences between be and fe:
+#   1. -blackbox_instance uses the gate path (/ -separated, no top),
+#      of the form <parent>/<bbox_inst>:
+#        fe's xs_fpga_top_debug_1902.u_wrapper -> be's u_wrapper
+#      (the top is flattened at be, so only the instance name remains; if the
+#       blackbox hangs under a sub-level, write parent/blackbox)
+#   2. the command MUST end with -gate
+#   3. the * wildcard is NOT supported - signals must be expanded bit-by-bit
 # =============================================================================
-# 注意: 下面 <parent>/<bbox_inst> 以 link_design 后的实际网表层次为准。
-# 不确定时在 uv_shell 里查 (见本文件末尾)。
+# Note: <parent>/<bbox_inst> below must match the actual netlist hierarchy
+# after link_design. If unsure, query it in uv_shell (see the end of this file).
 # =============================================================================
 
 read_netlist
-link_design                     ;# ★ 必须先 link, 否则黑盒实例没解析出来
+link_design                     ;# ★ must link first, otherwise the blackbox instance isn't resolved
 
 # ─────────────────────────────────────────────────────────────────
-# ★ 黑盒探针在 be 阶段重声明 (link_design 之后, trigger_probe -check 之前)
+# ★ re-declare the blackbox probe at the be stage
+#   (after link_design, before trigger_probe -check)
 # ─────────────────────────────────────────────────────────────────
 probe_net -blackbox_instance {<parent>/<bbox_inst>} \
           -clock {<sub>/clk_name} \
           -add {
-              <sub>/<层次>/<信号>[0]
-              <sub>/<层次>/<信号>[1]
+              <sub>/<hierarchy>/<signal>[0]
+              <sub>/<hierarchy>/<signal>[1]
           } -gate                                          ;# ★ -gate!
 
 # trigger_net -add -group bbox_gp0 \
 #             -blackbox_instance {<parent>/<bbox_inst>} \
 #             -clock {<sub>/clk_name} \
 #             -signal {
-#               <sub>/<层次>/<触发>[0]
-#               <sub>/<层次>/<触发>[1]
+#               <sub>/<hierarchy>/<trigger>[0]
+#               <sub>/<hierarchy>/<trigger>[1]
 #             } -gate
 # ─────────────────────────────────────────────────────────────────
 
 instrument_design
 sanitize_design
 init_runtime_data
-trigger_probe -check          ;# ★ 在这里校验黑盒信号, 报 not found 就是上面路径写错
+trigger_probe -check          ;# ★ validates blackbox signals here; "not found" means the path above is wrong
 sweep_design
 
 # ... config_clock / infer_clock / transform_clock ...
 
-trigger_probe -group          ;# ★ 打包 pseudo-IP
+trigger_probe -group          ;# ★ package into a pseudo-IP
 sweep_design -remap
 
-# 之后照常 partition_design / route_design / compile_fpga ...
+# then continue with partition_design / route_design / compile_fpga ...
 
 # =============================================================================
-# 怎么确认 be 里黑盒实例的真实路径:
-#   link_design 之后, 在 uv_shell 里跑:
+# How to confirm the blackbox instance's real path at the be stage:
+#   after link_design, run in uv_shell:
 #     get_cells -hier -filter {IS_PRIMITIVE==false} | grep wrapper
-#   或:
+#   or:
 #     report_resource -depth 3
 # =============================================================================

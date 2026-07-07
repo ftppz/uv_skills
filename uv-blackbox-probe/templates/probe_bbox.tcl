@@ -1,37 +1,40 @@
 # =============================================================================
-# probe_bbox.tcl — 黑盒（DCP）内部信号探针 [fe 阶段声明]
+# probe_bbox.tcl - blackbox (DCP) internal-signal probe [fe-stage declaration]
 #
-# 用法: 在 frontend.tcl 里 create_working_space 之后:
+# Usage: in frontend.tcl, after create_working_space:
 #     set_option signal.uhd.sampling_clock.allow_local_clock true
 #     source ./user_script/probe_bbox.tcl
 #
-# ★ 三条铁律 (违反一条就抓不到):
-#   1. -blackbox_instance 用全路径 (带顶层, . 分隔), 如 xs_fpga_top_debug_1902.u_wrapper
-#   2. -clock / -add 里的路径从黑盒【第一级子层次】起, 【不带黑盒根】, / 分隔
-#   3. 采样时钟来自黑盒内部时, 必须先开 allow_local_clock
+# Three iron rules (break any one and you capture nothing):
+#   1. -blackbox_instance uses the full path (with top, .-separated),
+#      e.g. xs_fpga_top_debug_1902.u_wrapper
+#   2. paths in -clock / -add start from the blackbox's FIRST sub-hierarchy level,
+#      WITHOUT the blackbox root, /-separated
+#   3. when the sampling clock comes from inside the blackbox,
+#      allow_local_clock MUST be enabled first
 #
-# 参考 UG Part2 §7.12 (含 §7.12 Note1 采样时钟开关)
+# Reference: UG Part2 §7.12 (incl. §7.12 Note1 for the sampling-clock option)
 # =============================================================================
 
-# ---- 用户必须改这三行 ----
-set BBOX_INST   "xs_fpga_top_debug_1902.u_wrapper"          ;# 黑盒实例全路径(带顶层)
-set BBOX_CLOCK  "ln_quad_i/in_mmcm/sys_clk"                 ;# 黑盒内时钟相对路径(不带根)
-# 要抓的黑盒内信号(逐位, fe 支持 * 通配):
+# ---- the user MUST change these three lines ----
+set BBOX_INST   "xs_fpga_top_debug_1902.u_wrapper"          ;# blackbox instance full path (with top)
+set BBOX_CLOCK  "ln_quad_i/in_mmcm/sys_clk"                 ;# blackbox-internal clock, relative path (no root)
+# blackbox-internal signals to capture (bit-by-bit; fe supports the * wildcard):
 set BBOX_PROBE  [list \
-    ln_quad_i/<你的层次>/<信号>[0] \
-    ln_quad_i/<你的层次>/<信号>[1] \
-    ln_quad_i/<别的层次>/<flag> \
+    ln_quad_i/<your_hierarchy>/<signal>[0] \
+    ln_quad_i/<your_hierarchy>/<signal>[1] \
+    ln_quad_i/<other_hierarchy>/<flag> \
 ]
 
 # =============================================================================
-# 探针声明 (一般不用改下面)
+# probe declaration (usually no need to change below)
 # =============================================================================
 
 probe_net -blackbox_instance $BBOX_INST \
           -clock $BBOX_CLOCK \
           -add $BBOX_PROBE
 
-# 可选: 触发组 (条件采集时才需要)
+# optional: trigger group (only needed for conditional capture)
 # trigger_net -add -group bbox_gp0 \
 #             -blackbox_instance $BBOX_INST \
 #             -clock $BBOX_CLOCK \
