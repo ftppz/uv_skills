@@ -16,7 +16,8 @@ probe_net -clock { <top_module>.<instance>.<clock> } -add { \
 # ---- 2. Trigger group: which signal triggers the capture
 #          (the trigger VALUE is written in uhd_setting.ini) ----
 # -group: trigger group name - must match uhd_setting.ini / hw_run.tcl.
-# -probe: optional - include to reuse signals already registered via probe_net.
+# -probe: optional - also add these trigger signals into the probe list so they
+#         are captured/viewed without a separate probe_net.
 trigger_net -add -group <trigger_group> \
     -clock <top_module>.<instance>.<clock> \
     -signal { \

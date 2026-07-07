@@ -83,7 +83,7 @@ probe_net -clock {xs_fpga_top_debug_1902.u_wrapper.sys_clk} -add { \
 ### 2.2 `trigger_net` — define a trigger group (write this when you want to trigger)
 
 ```tcl
-# syntax (-probe is optional, depending on whether you reuse registered probes)
+# syntax (-probe is optional)
 trigger_net -add -group <group_name> \
     [-probe] \
     -clock <sampling clock> \
@@ -99,9 +99,15 @@ trigger_net -add -group test \
 ```
 
 - `-group <group_name>`: trigger group name — must match what's in uhd_setting.ini / hw_run.tcl.
-- `-probe`: **optional**. Include it to indicate the signals come from a registered probe_net (must already be registered); omit it and trigger_net lists its own signals.
+- `-probe`: **optional**. Adds these trigger signals into the **probe** list as well, so they are captured/viewable in the waveform without a separate `probe_net`. (This is the trigger→probe direction; `probe_net` has no such link back to trigger.)
 - `-clock`: sampling clock (same as probe_net's).
 - `-signal { ... }`: trigger signal list (usually a 1-bit flag).
+
+> **probe vs. trigger relationship.** `probe_net` and `trigger_net` are siblings, not nested:
+> - `probe_net` = "what to **view**" (UHD-Probe, ≤35 capture stations × 512 bits).
+> - `trigger_net` = "when to **stop capturing**" (UHD-Trigger, ≤16 trigger groups × 256 bits).
+>
+> A trigger is **not** required to also be a probe, and a probe **cannot** be turned into a trigger. The only link is the `-probe` flag, which pushes trigger signals into the probe list (so trigger ⊆ probe when `-probe` is used). The common real-world pattern is the opposite of "probe is a subset of trigger": probe a large set, then trigger on a subset of it — see the `uvhs_flow` reference project, where every `trigger_net` signal is already in `probe_net`.
 
 ---
 
