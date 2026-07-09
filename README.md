@@ -8,7 +8,6 @@ A collection of reusable skills for UVHS-2 prototyping workflows. Each skill is 
 |---|---|
 | [uv-waveform-probe](./uv-waveform-probe) | Capture and view the waveform of a module or signal on the UVHS-2 prototype platform. Covers the full four-stage flow: fe registration (probe_net/trigger_net) → be instantiation (trigger_probe -check/-group) → runtime acquisition (capture/upload_uhd) → viewing the .usdb waveform in uvgui/uvd. |
 | [uv-multi-clock-probe](./uv-multi-clock-probe) | Capture waveforms across multiple clock domains on the UVHS-2. Extends uv-waveform-probe to the dual/multi-clock-domain case: split trigger_net groups by clock domain, declare each gated sampling clock (trigger -set -gatedclk with -polarity), combine cross-domain trigger groups with UHD_FINAL_CONDITIONS_LOGIC (OR only), and verify both domains captured. |
-| [uv-blackbox-probe](./uv-blackbox-probe) | Probe signals **inside a blackbox IP (DCP)** on the UVHS-2 — the case uv-waveform-probe does not cover. Uses probe_net/trigger_net with -blackbox_instance (fe, full path) and -gate (be, gate-level / path), declares blackbox-internal sampling clocks via allow_local_clock, and constrains the sampling clock to the same FPGA as the probed signals. |
 
 ## How to use
 
